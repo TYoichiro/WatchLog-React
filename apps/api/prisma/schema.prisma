@@ -18,25 +18,25 @@ enum DashboardNoticeTarget {
 }
 
 model User {
-  id                String              @id @default(cuid())
-  name              String?
-  email             String?             @unique
-  emailVerified     DateTime?           @map("email_verified")
-  image             String?
-  isBanned                Boolean             @default(false) @map("is_banned")
-  inviteCodeFailureCount  Int                 @default(0) @map("invite_code_failure_count")
-  accounts          Account[]
-  sessions          Session[]
-  registeredRoom    UserRegisteredRoom?
-  invitationCodes   InvitationCode[]    @relation("InvitationCodeInviter")
-  usedInviteCodes   InvitationCode[]    @relation("InvitationCodeUsedBy")
-  userRoles         UserRole[]          @relation("UserRoleUser")
-  assignedUserRoles UserRole[]          @relation("UserRoleAssignedBy")
-  auditLogs         AuditLog[]          @relation("ActorAuditLogs")
-  userBlocks        UserBlock[]         @relation("UserBlocks")
-  logFavorites      OnliveLogFavorite[]
-  createdAt         DateTime            @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("created_at")
-  updatedAt         DateTime            @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("updated_at")
+  id                     String              @id @default(cuid())
+  name                   String?
+  email                  String?             @unique
+  emailVerified          DateTime?           @map("email_verified") @db.Timestamptz(3)
+  image                  String?
+  isBanned               Boolean             @default(false) @map("is_banned")
+  inviteCodeFailureCount Int                 @default(0) @map("invite_code_failure_count")
+  accounts               Account[]
+  sessions               Session[]
+  registeredRoom         UserRegisteredRoom?
+  invitationCodes        InvitationCode[]    @relation("InvitationCodeInviter")
+  usedInviteCodes        InvitationCode[]    @relation("InvitationCodeUsedBy")
+  userRoles              UserRole[]          @relation("UserRoleUser")
+  assignedUserRoles      UserRole[]          @relation("UserRoleAssignedBy")
+  auditLogs              AuditLog[]          @relation("ActorAuditLogs")
+  userBlocks             UserBlock[]         @relation("UserBlocks")
+  logFavorites           OnliveLogFavorite[]
+  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime            @default(now()) @map("updated_at") @db.Timestamptz(3)
 
   @@map("users")
 }
@@ -49,8 +49,8 @@ model UserRegisteredRoom {
   roomName     String?         @map("room_name")
   imageUrl     String?         @map("image_url") @db.Text
   inviteCodeId String?         @unique @map("invite_code_id")
-  createdAt    DateTime        @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("created_at")
-  updatedAt    DateTime        @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("updated_at")
+  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime        @default(now()) @map("updated_at") @db.Timestamptz(3)
   user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   inviteCode   InvitationCode? @relation(fields: [inviteCodeId], references: [id], onDelete: SetNull)
 
@@ -63,10 +63,10 @@ model InvitationCode {
   code           String              @unique @db.VarChar(10)
   inviterUserId  String?             @map("inviter_user_id")
   usedByUserId   String?             @map("used_by_user_id")
-  usedAt         DateTime?           @map("used_at")
+  usedAt         DateTime?           @map("used_at") @db.Timestamptz(3)
   isDeleted      Boolean             @default(false) @map("is_deleted")
-  createdAt      DateTime            @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("created_at")
-  updatedAt      DateTime            @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("updated_at")
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime            @default(now()) @map("updated_at") @db.Timestamptz(3)
   inviter        User?               @relation("InvitationCodeInviter", fields: [inviterUserId], references: [id], onDelete: SetNull)
   usedBy         User?               @relation("InvitationCodeUsedBy", fields: [usedByUserId], references: [id], onDelete: SetNull)
   registeredRoom UserRegisteredRoom?
@@ -82,8 +82,8 @@ model UserBlock {
   blockerUserId           String   @map("blocker_user_id")
   blockedShowroomUserId   String   @map("blocked_showroom_user_id")
   blockedShowroomUserName String   @map("blocked_showroom_user_name")
-  createdAt               DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("created_at")
-  updatedAt               DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("updated_at")
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
   blocker                 User     @relation("UserBlocks", fields: [blockerUserId], references: [id], onDelete: Cascade)
 
   @@unique([blockerUserId, blockedShowroomUserId])
@@ -97,9 +97,9 @@ model RoomUserLastComment {
   roomId           String   @map("room_id")
   showroomUserId   String   @map("showroom_user_id")
   showroomUserName String   @map("showroom_user_name")
-  lastCommentAt    DateTime @map("last_comment_at")
-  createdAt        DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("created_at")
-  updatedAt        DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("updated_at")
+  lastCommentAt    DateTime @map("last_comment_at") @db.Timestamptz(3)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
 
   @@unique([roomId, showroomUserId])
   @@index([roomId, lastCommentAt])
@@ -111,11 +111,11 @@ model DashboardNotice {
   title         String
   content       String                @db.Text
   displayTarget DashboardNoticeTarget @default(AUTHENTICATED) @map("display_target")
-  publishedAt   DateTime              @map("published_at")
-  expiresAt     DateTime?             @map("expires_at")
+  publishedAt   DateTime              @map("published_at") @db.Timestamptz(3)
+  expiresAt     DateTime?             @map("expires_at") @db.Timestamptz(3)
   linkUrl       String?               @map("link_url") @db.Text
-  createdAt     DateTime              @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("created_at")
-  updatedAt     DateTime              @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("updated_at")
+  createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime              @default(now()) @map("updated_at") @db.Timestamptz(3)
 
   @@index([displayTarget, publishedAt])
   @@index([publishedAt])
@@ -127,29 +127,29 @@ model MaintenanceWindow {
   id        String   @id @default(cuid())
   title     String   @default("システムメンテナンス")
   message   String?  @db.Text
-  startsAt  DateTime @map("starts_at")
-  endsAt    DateTime @map("ends_at")
+  startsAt  DateTime @map("starts_at") @db.Timestamptz(3)
+  endsAt    DateTime @map("ends_at") @db.Timestamptz(3)
   isEnabled Boolean  @default(true) @map("is_enabled")
-  createdAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("created_at")
-  updatedAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
 
   @@index([isEnabled, startsAt, endsAt])
   @@map("maintenance_windows")
 }
 
 model OnliveLog {
-  id                String              @id @default(cuid())
-  roomId            String              @map("room_id")
-  liveId            String              @map("live_id")
-  capturedAt        DateTime            @map("captured_at")
-  log               Json
-  title             String?
-  commentCount      Int                 @default(0) @map("comment_count")
-  giftCount         Int                 @default(0) @map("gift_count")
-  isDeleted         Boolean             @default(false) @map("is_deleted")
-  createdAt  DateTime            @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("created_at")
-  updatedAt  DateTime            @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("updated_at")
-  favorites  OnliveLogFavorite[]
+  id           String              @id @default(cuid())
+  roomId       String              @map("room_id")
+  liveId       String              @map("live_id")
+  capturedAt   DateTime            @map("captured_at") @db.Timestamptz(3)
+  log          Json
+  title        String?
+  commentCount Int                 @default(0) @map("comment_count")
+  giftCount    Int                 @default(0) @map("gift_count")
+  isDeleted    Boolean             @default(false) @map("is_deleted")
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime            @default(now()) @map("updated_at") @db.Timestamptz(3)
+  favorites    OnliveLogFavorite[]
 
   @@unique([roomId, liveId, capturedAt])
   @@index([roomId, liveId])
@@ -161,7 +161,7 @@ model OnliveLogFavorite {
   id        String    @id @default(cuid())
   userId    String    @map("user_id")
   logId     String    @map("log_id")
-  createdAt DateTime  @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("created_at")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   log       OnliveLog @relation(fields: [logId], references: [id], onDelete: Cascade)
 
@@ -194,7 +194,7 @@ model Session {
   id           String   @id @default(cuid())
   sessionToken String   @unique @map("session_token")
   userId       String   @map("user_id")
-  expires      DateTime
+  expires      DateTime @db.Timestamptz(3)
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
@@ -204,7 +204,7 @@ model Session {
 model VerificationToken {
   identifier String
   token      String
-  expires    DateTime
+  expires    DateTime @db.Timestamptz(3)
 
   @@unique([identifier, token])
   @@map("verification_tokens")
@@ -216,8 +216,8 @@ model Role {
   description     String?
   userRoles       UserRole[]
   rolePermissions RolePermission[]
-  createdAt       DateTime         @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("created_at")
-  updatedAt       DateTime         @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("updated_at")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime         @default(now()) @map("updated_at") @db.Timestamptz(3)
 
   @@map("roles")
 }
@@ -227,8 +227,8 @@ model Permission {
   action          String           @unique
   description     String?
   rolePermissions RolePermission[]
-  createdAt       DateTime         @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("created_at")
-  updatedAt       DateTime         @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("updated_at")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime         @default(now()) @map("updated_at") @db.Timestamptz(3)
 
   @@map("permissions")
 }
@@ -238,7 +238,7 @@ model UserRole {
   userId           String   @map("user_id")
   roleId           String   @map("role_id")
   assignedByUserId String?  @map("assigned_by_user_id")
-  assignedAt       DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("assigned_at")
+  assignedAt       DateTime @default(now()) @map("assigned_at") @db.Timestamptz(3)
   user             User     @relation("UserRoleUser", fields: [userId], references: [id], onDelete: Cascade)
   role             Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
   assignedBy       User?    @relation("UserRoleAssignedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
@@ -253,7 +253,7 @@ model RolePermission {
   id           String     @id @default(cuid())
   roleId       String     @map("role_id")
   permissionId String     @map("permission_id")
-  createdAt    DateTime   @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("created_at")
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
   permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
@@ -269,7 +269,7 @@ model AuditLog {
   resource    String
   resourceId  String?  @map("resource_id")
   detail      Json
-  createdAt   DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo')")) @map("created_at")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   actor       User?    @relation("ActorAuditLogs", fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([actorUserId, createdAt])

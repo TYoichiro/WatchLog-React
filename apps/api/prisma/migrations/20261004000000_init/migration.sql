@@ -6,10 +6,12 @@ CREATE TABLE "users" (
     "id" TEXT NOT NULL,
     "name" TEXT,
     "email" TEXT,
-    "email_verified" TIMESTAMP(3),
+    "email_verified" TIMESTAMPTZ(3),
     "image" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
-    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
+    "is_banned" BOOLEAN NOT NULL DEFAULT false,
+    "invite_code_failure_count" INTEGER NOT NULL DEFAULT 0,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );
@@ -23,8 +25,8 @@ CREATE TABLE "user_registered_rooms" (
     "room_name" TEXT,
     "image_url" TEXT,
     "invite_code_id" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
-    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "user_registered_rooms_pkey" PRIMARY KEY ("id")
 );
@@ -35,10 +37,10 @@ CREATE TABLE "invitation_codes" (
     "code" VARCHAR(10) NOT NULL,
     "inviter_user_id" TEXT,
     "used_by_user_id" TEXT,
-    "used_at" TIMESTAMP(3),
+    "used_at" TIMESTAMPTZ(3),
     "is_deleted" BOOLEAN NOT NULL DEFAULT false,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
-    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "invitation_codes_pkey" PRIMARY KEY ("id")
 );
@@ -49,10 +51,23 @@ CREATE TABLE "user_blocks" (
     "blocker_user_id" TEXT NOT NULL,
     "blocked_showroom_user_id" TEXT NOT NULL,
     "blocked_showroom_user_name" TEXT NOT NULL,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
-    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "user_blocks_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "room_user_last_comments" (
+    "id" TEXT NOT NULL,
+    "room_id" TEXT NOT NULL,
+    "showroom_user_id" TEXT NOT NULL,
+    "showroom_user_name" TEXT NOT NULL,
+    "last_comment_at" TIMESTAMPTZ(3) NOT NULL,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "room_user_last_comments_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -61,11 +76,11 @@ CREATE TABLE "dashboard_notices" (
     "title" TEXT NOT NULL,
     "content" TEXT NOT NULL,
     "display_target" "DashboardNoticeTarget" NOT NULL DEFAULT 'AUTHENTICATED',
-    "published_at" TIMESTAMP(3) NOT NULL,
-    "expires_at" TIMESTAMP(3),
+    "published_at" TIMESTAMPTZ(3) NOT NULL,
+    "expires_at" TIMESTAMPTZ(3),
     "link_url" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
-    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "dashboard_notices_pkey" PRIMARY KEY ("id")
 );
@@ -75,11 +90,11 @@ CREATE TABLE "maintenance_windows" (
     "id" TEXT NOT NULL,
     "title" TEXT NOT NULL DEFAULT 'システムメンテナンス',
     "message" TEXT,
-    "starts_at" TIMESTAMP(3) NOT NULL,
-    "ends_at" TIMESTAMP(3) NOT NULL,
+    "starts_at" TIMESTAMPTZ(3) NOT NULL,
+    "ends_at" TIMESTAMPTZ(3) NOT NULL,
     "is_enabled" BOOLEAN NOT NULL DEFAULT true,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
-    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "maintenance_windows_pkey" PRIMARY KEY ("id")
 );
@@ -89,13 +104,26 @@ CREATE TABLE "onlive_logs" (
     "id" TEXT NOT NULL,
     "room_id" TEXT NOT NULL,
     "live_id" TEXT NOT NULL,
-    "captured_at" TIMESTAMP(3) NOT NULL,
+    "captured_at" TIMESTAMPTZ(3) NOT NULL,
     "log" JSONB NOT NULL,
+    "title" TEXT,
+    "comment_count" INTEGER NOT NULL DEFAULT 0,
+    "gift_count" INTEGER NOT NULL DEFAULT 0,
     "is_deleted" BOOLEAN NOT NULL DEFAULT false,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
-    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "onlive_logs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "onlive_log_favorites" (
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "log_id" TEXT NOT NULL,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "onlive_log_favorites_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -121,7 +149,7 @@ CREATE TABLE "sessions" (
     "id" TEXT NOT NULL,
     "session_token" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
-    "expires" TIMESTAMP(3) NOT NULL,
+    "expires" TIMESTAMPTZ(3) NOT NULL,
 
     CONSTRAINT "sessions_pkey" PRIMARY KEY ("id")
 );
@@ -130,7 +158,7 @@ CREATE TABLE "sessions" (
 CREATE TABLE "verification_tokens" (
     "identifier" TEXT NOT NULL,
     "token" TEXT NOT NULL,
-    "expires" TIMESTAMP(3) NOT NULL
+    "expires" TIMESTAMPTZ(3) NOT NULL
 );
 
 -- CreateTable
@@ -138,8 +166,8 @@ CREATE TABLE "roles" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "description" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
-    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "roles_pkey" PRIMARY KEY ("id")
 );
@@ -149,8 +177,8 @@ CREATE TABLE "permissions" (
     "id" TEXT NOT NULL,
     "action" TEXT NOT NULL,
     "description" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
-    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "permissions_pkey" PRIMARY KEY ("id")
 );
@@ -161,7 +189,7 @@ CREATE TABLE "user_roles" (
     "user_id" TEXT NOT NULL,
     "role_id" TEXT NOT NULL,
     "assigned_by_user_id" TEXT,
-    "assigned_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
+    "assigned_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "user_roles_pkey" PRIMARY KEY ("id")
 );
@@ -171,7 +199,7 @@ CREATE TABLE "role_permissions" (
     "id" TEXT NOT NULL,
     "role_id" TEXT NOT NULL,
     "permission_id" TEXT NOT NULL,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "role_permissions_pkey" PRIMARY KEY ("id")
 );
@@ -184,7 +212,7 @@ CREATE TABLE "audit_logs" (
     "resource" TEXT NOT NULL,
     "resource_id" TEXT,
     "detail" JSONB NOT NULL,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'),
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "audit_logs_pkey" PRIMARY KEY ("id")
 );
@@ -223,6 +251,12 @@ CREATE INDEX "user_blocks_blocker_user_id_created_at_idx" ON "user_blocks"("bloc
 CREATE UNIQUE INDEX "user_blocks_blocker_user_id_blocked_showroom_user_id_key" ON "user_blocks"("blocker_user_id", "blocked_showroom_user_id");
 
 -- CreateIndex
+CREATE INDEX "room_user_last_comments_room_id_last_comment_at_idx" ON "room_user_last_comments"("room_id", "last_comment_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "room_user_last_comments_room_id_showroom_user_id_key" ON "room_user_last_comments"("room_id", "showroom_user_id");
+
+-- CreateIndex
 CREATE INDEX "dashboard_notices_display_target_published_at_idx" ON "dashboard_notices"("display_target", "published_at");
 
 -- CreateIndex
@@ -242,6 +276,12 @@ CREATE INDEX "onlive_logs_room_id_is_deleted_captured_at_idx" ON "onlive_logs"("
 
 -- CreateIndex
 CREATE UNIQUE INDEX "onlive_logs_room_id_live_id_captured_at_key" ON "onlive_logs"("room_id", "live_id", "captured_at");
+
+-- CreateIndex
+CREATE INDEX "onlive_log_favorites_user_id_created_at_idx" ON "onlive_log_favorites"("user_id", "created_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "onlive_log_favorites_user_id_log_id_key" ON "onlive_log_favorites"("user_id", "log_id");
 
 -- CreateIndex
 CREATE INDEX "accounts_user_id_idx" ON "accounts"("user_id");
@@ -304,6 +344,12 @@ ALTER TABLE "invitation_codes" ADD CONSTRAINT "invitation_codes_used_by_user_id_
 ALTER TABLE "user_blocks" ADD CONSTRAINT "user_blocks_blocker_user_id_fkey" FOREIGN KEY ("blocker_user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "onlive_log_favorites" ADD CONSTRAINT "onlive_log_favorites_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "onlive_log_favorites" ADD CONSTRAINT "onlive_log_favorites_log_id_fkey" FOREIGN KEY ("log_id") REFERENCES "onlive_logs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "accounts" ADD CONSTRAINT "accounts_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -326,3 +372,53 @@ ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_permission_id_fk
 
 -- AddForeignKey
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_actor_user_id_fkey" FOREIGN KEY ("actor_user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+
+-- updated_at を DB 側で更新する（Prisma を通さない SQL での更新にも効く）
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = CURRENT_TIMESTAMP;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_users_updated_at
+  BEFORE UPDATE ON "users"
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_user_registered_rooms_updated_at
+  BEFORE UPDATE ON "user_registered_rooms"
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_invitation_codes_updated_at
+  BEFORE UPDATE ON "invitation_codes"
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_user_blocks_updated_at
+  BEFORE UPDATE ON "user_blocks"
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_room_user_last_comments_updated_at
+  BEFORE UPDATE ON "room_user_last_comments"
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_dashboard_notices_updated_at
+  BEFORE UPDATE ON "dashboard_notices"
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_maintenance_windows_updated_at
+  BEFORE UPDATE ON "maintenance_windows"
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_onlive_logs_updated_at
+  BEFORE UPDATE ON "onlive_logs"
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_roles_updated_at
+  BEFORE UPDATE ON "roles"
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_permissions_updated_at
+  BEFORE UPDATE ON "permissions"
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();

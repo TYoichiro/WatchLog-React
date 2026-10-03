@@ -1,3 +1,4 @@
+import { SessionProvider } from "@hono/auth-js/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -12,8 +13,11 @@ const queryClient = createQueryClient();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
+    {/* /api/auth/session からログイン状態を取得し、useSession() で参照できるようにする */}
+    <SessionProvider>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </SessionProvider>
   </StrictMode>,
 );

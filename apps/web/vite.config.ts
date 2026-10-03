@@ -11,9 +11,13 @@ export default defineConfig({
     conditions: ["source", ...defaultClientConditions],
   },
   server: {
-    // ローカル開発時は API サーバー（npm run dev:api）へ転送する
+    // ブラウザで開く URL を Docker と同じ http://localhost:3000 にそろえる
+    // （Google OAuth のリダイレクト URI を開発と本番で共通にするため）
+    port: 3000,
+    strictPort: true,
+    // ローカル開発時は API サーバー（npm run dev:api、3001 番）へ転送する
     proxy: {
-      "/api": "http://localhost:3000",
+      "/api": "http://localhost:3001",
     },
   },
 });

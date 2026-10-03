@@ -2,7 +2,9 @@
 
 SHOWROOM 配信ログツール「WatchLog」（Next.js 16 / App Router）を、React SPA と Hono API サーバーの構成で作り直すプロジェクトです。
 
-> **現在の状態**: Docker で起動できます。画面は空ページで、API（`GET /api`）は空の JSON（`{}`）を返すだけです。移植の準備（`@/` エイリアス、shadcn の設定とテーマ、API の型共有、TanStack Query）と、PostgreSQL・Prisma の導入（スキーマ・マイグレーション・シードを元のアプリから移植）までは済んでいます。認証（Auth.js）はまだありません。
+> 元のアプリ（`watchlog-original/`）は参考として見るだけで、互換性は持ちません。
+>
+> **現在の状態**: Docker で起動できます。画面は空ページで、API（`GET /api`）は空の JSON（`{}`）を返すだけです。移植の準備（`@/` エイリアス、shadcn の設定とテーマ、API の型共有、TanStack Query）と、PostgreSQL・Prisma の導入（日時の列はすべて TIMESTAMPTZ で、JST で統一）と、認証（Auth.js / Google OAuth）の導入までは済んでいます。画面（ログイン画面など）の移植はこれからです。
 >
 > AI エージェント（Claude Code・Codex など）向けの開発ルールと移植の対応表は [AGENTS.md](AGENTS.md) にあります。
 
@@ -54,14 +56,15 @@ WatchLog-React/
 │     ├─ prisma.config.ts  # Prisma の設定（スキーマ・マイグレーション・シードの場所）
 │     ├─ tsconfig.build.json  # ビルド用。テストファイルを出力から外す
 │     ├─ prisma/
-│     │  ├─ schema.prisma  # 元のアプリから移植（生成先だけ変更）
-│     │  ├─ migrations/  # 元のアプリのマイグレーションをそのままコピー
+│     │  ├─ schema.prisma  # 元のアプリをもとに作成（日時の列はすべて TIMESTAMPTZ）
+│     │  ├─ migrations/  # 初期マイグレーション（TIMESTAMPTZ、updated_at のトリガー）
 │     │  └─ seed.ts      # ロール・権限などの初期データ
 │     └─ src/
-│        ├─ app.ts       # /api のルート定義（AppType を export し、web が型として使う）
+│        ├─ app.ts       # /api のルート定義（AppType を export し、web が型として使う）。Auth.js もここにつなぐ
+│        ├─ auth.ts      # Auth.js の設定（Google OAuth、DB セッション、ユーザー作成時のロール付与など）
 │        ├─ server.ts    # API と SPA を配信するアプリを組み立てる
 │        ├─ index.ts     # サーバーの起動（ポート待ち受けとシグナル処理）
-│        ├─ lib/         # prisma（DB 接続）、env（必須の環境変数）、server-timezone
+│        ├─ lib/         # prisma（DB 接続）、authz（認可）、audit（監査ログ）、logger、env
 │        └─ generated/prisma/  # prisma generate の出力（git 管理外）
 ├─ packages/
 │  └─ shared/            # @watchlog/shared 共有する型・JST ヘルパーなど
@@ -187,40 +190,105 @@ npm 11 の `allowScripts` では、次のパッケージだけにインストー
 | `@vercel/analytics`、`@vercel/speed-insights` | Vercel にはデプロイしない（自前の Docker で運用する）ため |
 | `shadcn` | CLI の依存に修正版のない脆弱性があるため入れない。CSS だけを取り込み、CLI は `npx shadcn@4.5.0` で実行する（「shadcn / テーマ」を参照） |
 
+## 認証（Auth.js / Google OAuth）
+
+Google アカウントでログインし、セッションは DB に保存します。
+
+| 項目 | 内容 |
+| --- | --- |
+| ライブラリ | `@auth/core` + `@hono/auth-js`（API）、`@hono/auth-js/react`（画面） |
+| ルート | `/api/auth/*`（`/api/auth/signin`、`/api/auth/callback/google`、`/api/auth/session`、`/api/auth/signout` など）。設定は `apps/api/src/auth.ts` |
+| セッション | DB（`sessions` テーブル）に保存し、有効期間は 180 日。Cookie は `authjs.session-token`（HttpOnly） |
+| ユーザー作成時 | `user` ロールを付け、監査ログ（`auth.user.create`）を残す。サインイン・サインアウトも監査ログとログに残す |
+| 認可 | `apps/api/src/lib/authz.ts` の `requireUser(c)` / `requirePermission(c, action)` などを API の先頭で呼ぶ。未ログインは JSON の 401、権限なし・BAN 済みは JSON の 403 になる（`app.ts` の `apiErrorHandler`） |
+| 画面 | `main.tsx` で `SessionProvider` を設定済み。`useSession()` でログイン状態を取り、`signIn("google")` / `signOut()` でログイン・ログアウトする |
+
+### セッションに入れる情報
+
+| 場所 | 中身 |
+| --- | --- |
+| Cookie（`authjs.session-token`、HttpOnly） | ランダムなセッショントークンだけ。ユーザーの情報は入らない |
+| `/api/auth/session`（`useSession()` が取得する） | `user.id`（ユーザー ID）と `expires`（有効期限、`+09:00` 付きの JST）だけ |
+
+- 名前・メールアドレス・画像はセッションに含めません。API で必要なときは DB から読みます（`requireUser` が DB から取得して返します）。
+- Auth.js の既定では、`/api/auth/session` がセッションの行（**`sessionToken` を含む**）と `users` の行（`isBanned` など）をそのまま返します。HttpOnly の Cookie に入れたトークンを JavaScript から読めてしまうので、`auth.ts` の `session` コールバックで絞っています。
+- 環境変数は `NEXTAUTH_URL` ではなく `AUTH_URL`（値は `http://localhost:3000/api/auth`）です。パスの `/api/auth` から Auth.js のルートの位置が決まります。
+
+### 環境変数（`apps/api/.env`）
+
+| 変数 | 内容 |
+| --- | --- |
+| `AUTH_URL` | `http://localhost:3000/api/auth`（ブラウザで開く URL + `/api/auth`） |
+| `AUTH_SECRET` | 署名用の秘密鍵。`.env.example` に生成コマンドがある |
+| `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Google Cloud Console で発行した OAuth クライアントの ID とシークレット |
+
+API サーバーは、起動時にこれらと `DATABASE_URL` があるかを検証し、足りなければ起動しません。
+
+### Google OAuth のリダイレクト URI
+
+開発でも Docker でも、ブラウザで開く URL は `http://localhost:3000` です。そのため、Google Cloud Console に登録するリダイレクト URI は、元のアプリと同じ次の 1 つで済みます。
+
+```
+http://localhost:3000/api/auth/callback/google
+```
+
 ## データベース（PostgreSQL / Prisma）
 
 | 項目 | 内容 |
 | --- | --- |
 | DB | PostgreSQL 16（`postgres:16-alpine3.24`）。元のアプリと同じメジャーバージョン |
-| スキーマ | `apps/api/prisma/schema.prisma`。元のアプリからコピーし、生成先（`../src/generated/prisma`）と、Node ESM 向けの出力設定（`moduleFormat = "esm"`、`importFileExtension = "js"`）だけを変えた |
-| マイグレーション | `apps/api/prisma/migrations`。元のアプリの 8 本をそのままコピーしたので、既存の DB とそのまま互換がある。既存のマイグレーションは編集せず、変更は `prisma migrate dev` で新しいマイグレーションとして追加する |
+| スキーマ | `apps/api/prisma/schema.prisma`。元のアプリのものをもとに、日時の列をすべて `TIMESTAMPTZ(3)` にした。生成先は `../src/generated/prisma`（Node ESM 向けに `moduleFormat = "esm"`、`importFileExtension = "js"`） |
+| マイグレーション | `apps/api/prisma/migrations`。新しい初期マイグレーション `20261004000000_init` 1 本から始めた（元のアプリの DB との互換は持たない）。`updated_at` を持つ 10 テーブルすべてに、更新時に `updated_at` を書き換えるトリガーを付けている。コミットしたマイグレーションは編集せず、変更は `prisma migrate dev` で新しいマイグレーションとして追加する |
 | Prisma Client | `prisma generate` で `apps/api/src/generated/prisma` に TypeScript として生成する（git 管理外）。tsc でそのまま `dist` にコンパイルされるので、実行用イメージへの追加のコピーは不要 |
-| 接続 | `apps/api/src/lib/prisma.ts` の `prisma` を使う。`@prisma/adapter-pg` で接続し、DB セッションのタイムゾーンを `Asia/Tokyo` にする |
+| 接続 | `apps/api/src/lib/prisma.ts` の `prisma`（スクリプトやシードでは `createPrismaClient()`）を使う。`@prisma/adapter-pg` で接続する |
 
 `prisma generate` は、api の `dev`・`build`・`typecheck`・`test` の前に自動で実行されます。DB への接続は不要なので、`DATABASE_URL` がなくても動きます。
 
 ### 日時とタイムゾーン（すべて JST）
 
-UTC が混ざると混乱するので、DB・アプリ・コンテナのどこで見ても日本時間（`Asia/Tokyo`）になるようにしています。
+UTC が混ざると混乱するので、DB・アプリ・API・ログ・コンテナのどこで見ても日本時間（`Asia/Tokyo`）になるようにしています。
 
 | 場所 | 設定 |
 | --- | --- |
-| DB の列 | `TIMESTAMP(3)`（タイムゾーンなし）に **JST の値**を保存する。既定値は `CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'`（元のアプリと同じ） |
-| DB サーバー | 既定の `timezone` と `log_timezone` を `Asia/Tokyo` にする。compose では起動オプション（`-c timezone=...`）と `TZ` で、CI では `TZ`（initdb が設定ファイルに書き込む）で設定する。psql や生の SQL の `now()` も、ログの時刻も JST になる |
-| Prisma の接続 | 接続オプションで、セッションのタイムゾーンも `Asia/Tokyo` にする |
+| DB の列 | すべて `TIMESTAMPTZ(3)`（タイムゾーン付き）。正しい時刻を保存し、psql などでは `2026-10-04 00:15:29+09` のように JST で表示される。既定値は `now()` |
+| DB サーバー | 既定の `timezone` と `log_timezone` を `Asia/Tokyo` にする。compose では起動オプション（`-c timezone=...`）と `TZ` で、CI では `TZ`（initdb が設定ファイルに書き込む）で設定する |
+| アプリのコード | `Date` は常に正しい時刻を持つ。9 時間ずらすような変換はしない |
+| API・ログの出力 | `toJstIsoString()` で `2026-01-15T15:00:00.000+09:00` のように JST にする。`Date#toISOString()`（UTC の `Z`）は外に出さない |
 | コンテナ | db・migrate・app はすべて `TZ=Asia/Tokyo`。Node のイメージには `tzdata` を入れているので、`date` コマンドも JST になる |
-| Node.js | `TZ=Asia/Tokyo`。`server-timezone.ts` と `prisma.config.ts` でも `process.env.TZ` を設定する |
 
-コードで日時を扱うときは、`@watchlog/shared` の JST ヘルパーを使います。Prisma は JST の値を「UTC の `Date`」として返すので、`new Date()` をそのまま DB に書き込むと 9 時間ずれます。
+日時を扱うときは、`@watchlog/shared` のヘルパーを使います。
 
 | 用途 | 使う関数 |
 | --- | --- |
-| 現在時刻を書き込む・保存済みの時刻と比べる | `toJstWallTimeDate()` |
-| 入力値（文字列）を日時にする | `parseJstWallTime()` / `createJstWallTimeDate()` |
-| API で返す | `toJstWallTimeIsoString()`（`+09:00` 付きの文字列） |
-| 画面に表示する | `formatJstWallDateTime()` |
+| API で返す・ログに出す | `toJstIsoString(date)` |
+| 入力値（文字列）を日時にする | `parseJstDateTime()` / `createJstDateTime()`（オフセットのない文字列は JST とみなす） |
+| 画面に表示する | `formatJstDateTime()`（常に `Asia/Tokyo` で整形する） |
+| JST の日付（`YYYY-MM-DD`）を得る | `toJstDateString(date)` |
+| JST のその日の 0 時を得る | `startOfJstDay(date)` |
 
-`apps/api/src/lib/prisma.test.ts` で、Prisma の接続と DB サーバーの既定値の両方が `Asia/Tokyo` であることを確認しています。
+#### 日付で区切る処理は JST で計算する
+
+保存値は UTC なので、日付で区切る処理（「今日の配信ログ」「日別の集計」「○月○日の検索」など）をそのまま UTC で行うと、**JST の 0 時〜9 時のデータが前日に入ってしまいます**。日付は必ず JST で計算します。
+
+| 書く場所 | 正しい書き方 | 使ってはいけない書き方 |
+| --- | --- | --- |
+| JS / TS | `toJstDateString(date)`、範囲は `[startOfJstDay(d), startOfJstDay(d) + 24 時間)` | `toISOString().slice(0, 10)`、`getDate()`、`setHours(0, 0, 0, 0)` |
+| SQL | `date_trunc('day', created_at AT TIME ZONE 'Asia/Tokyo')`、`(created_at AT TIME ZONE 'Asia/Tokyo')::date` | `created_at::date`（Prisma の接続は UTC なので UTC の日付になる） |
+
+#### Prisma の接続だけは UTC にしている理由
+
+`@prisma/adapter-pg` は、DB セッションが UTC である前提で日時を変換します。
+
+- 書き込むときは、`Date` をオフセットのない UTC の文字列で送ります。
+- 読み込むときは、DB が返すオフセット（`+09` など）を `+00:00` に置き換えて読みます。
+
+そのため、Prisma の接続のセッションを JST にすると、値が 9 時間ずれて保存されます（Prisma で書いて Prisma で読むと逆向きにずれるので、アプリからは気づけません）。`createPrismaClient()` は、Prisma の接続だけセッションを UTC（`-c timezone=UTC`）にします。列は `TIMESTAMPTZ` なので、保存される値は正しい時刻で、DB を見れば JST で表示されます。この設定は変えないでください。
+
+`apps/api/src/lib/prisma.test.ts` では、次のことを確認しています。
+
+- タイムゾーンなしの日時の列がないこと
+- Prisma で保存した値を、別の接続（JST）で読んでも同じ時刻で、`+09` で表示されること
+- DB サーバーの既定値が JST であること
 
 ### api の Prisma 関連の npm scripts
 
@@ -250,7 +318,7 @@ docker compose up -d --build
 | --- | --- |
 | `db` | PostgreSQL。データは名前付きボリューム `postgres_data` に保存する。ローカル開発用に `127.0.0.1:5432` で公開する（`DB_PORT` で変更でき、外部からは接続できない） |
 | `migrate` | `db` が起動したら `prisma migrate deploy` を実行して終了する。Prisma CLI が必要なので、Dockerfile の `migrator` ステージ（devDependencies を含む）を使う |
-| `app` | `migrate` が成功してから起動する |
+| `app` | `migrate` が成功してから起動する。認証の秘密情報は `apps/api/.env` から読み込み（`env_file`）、`PORT` と `AUTH_URL` は Docker 用の値で上書きする。ログは名前付きボリューム `app_logs`（`/app/logs`）に保存する |
 
 初期データは次のコマンドで入れます。
 
@@ -304,22 +372,23 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image
 
 ```bash
 npm install
-cp apps/api/.env.example apps/api/.env   # DATABASE_URL を設定する（初回のみ）
+cp apps/api/.env.example apps/api/.env   # 初回のみ。AUTH_SECRET と Google の ID・シークレットを設定する
 docker compose up -d db                  # PostgreSQL だけを Docker で起動する
 npm run prisma:migrate -w @watchlog/api  # マイグレーションを適用する
 npm run prisma:seed -w @watchlog/api     # 初期データを入れる（初回のみ）
-npm run dev:api   # http://localhost:3000（API。apps/api/.env を読み込む）
-npm run dev:web   # http://localhost:5173（画面。/api は 3000 番へプロキシ）
+npm run dev:api   # API を 3001 番で起動する（apps/api/.env を読み込む）
+npm run dev:web   # http://localhost:3000 をブラウザで開く（/api は 3001 番へ転送）
 ```
 
-> `docker compose up -d`（全サービス）で `app` も起動していると、3000 番ポートがぶつかって `dev:api` が起動できません。ローカル開発中は `db` だけを起動してください。
+- ブラウザで開く URL は、Docker と同じ `http://localhost:3000` にそろえています。Google OAuth のリダイレクト URI を、開発と Docker で共通にするためです。
+- `docker compose up -d`（全サービス）で `app` も起動していると、3000 番ポートがぶつかって `dev:web` が起動できません。ローカル開発中は `db` だけを起動してください。
 
 ### npm scripts（ルート）
 
 | コマンド | 内容 |
 | --- | --- |
-| `npm run dev:web` | フロントエンドの開発サーバー（Vite） |
-| `npm run dev:api` | API サーバー（`tsx watch`） |
+| `npm run dev:web` | フロントエンドの開発サーバー（Vite、http://localhost:3000） |
+| `npm run dev:api` | API サーバー（`tsx watch`、3001 番） |
 | `npm run build` | すべてのワークスペースをビルド |
 | `npm run test` | すべてのワークスペースのテストを実行 |
 | `npm run typecheck` | すべてのワークスペースの型チェック（テストファイルも対象） |
@@ -342,7 +411,7 @@ npm run dev:web   # http://localhost:5173（画面。/api は 3000 番へプロ�
 
 | ジョブ | 内容 |
 | --- | --- |
-| Lint / Typecheck / Test / Build | PostgreSQL のサービスコンテナを起動し、`npm ci` → lint → format:check → typecheck → マイグレーション適用 → test → build を実行する |
+| Lint / Typecheck / Test / Build | PostgreSQL のサービスコンテナを起動し、`npm ci` → lint → format:check → typecheck → マイグレーション適用 → シード（2 回。冪等であることの確認）→ test → build を実行する |
 | Docker compose | `docker compose up -d --build` で db → migrate → app を起動し、`/api` が `{}` を返すこと、`/` が表示されること、migrate が正常終了したこと、実行用イメージの Prisma Client で DB を検索できることを確認する |
 
 コミットの前には、ローカルでも `npm run lint && npm run format:check && npm run typecheck && npm run test && npm run build` を実行してください。
@@ -355,27 +424,32 @@ Vitest と Testing Library を使います。テストファイルは対象フ�
 | --- | --- | --- |
 | `apps/api` | node | Hono の `app.request()` で、ポートを開かずにリクエストを送る。DB を使うテストは Prisma をモックせず、実際の PostgreSQL に接続する（`DATABASE_URL` がなければスキップ） |
 | `packages/shared` | node | 純粋な関数を直接テストする |
-| `apps/web` | jsdom | `@/test-utils/render` の `renderWithProviders` / `renderRoute` で描画する。通信は `vi.stubGlobal("fetch", ...)` で差し替える |
+| `apps/web` | jsdom | `@/test-utils/render` の `renderWithProviders` / `renderRoute` で描画する。ログイン状態は `{ session }` オプションで渡す（`/api/auth/session` は呼ばない）。通信は `vi.stubGlobal("fetch", ...)` で差し替える |
 
 今あるテスト:
 
-- `apps/api/src/app.test.ts`: `GET /api` が空の JSON を返すこと
 - `apps/api/src/server.test.ts`: 静的ファイルの配信、SPA のフォールバック、`/api/*` の 404 を JSON で返すこと。一時ディレクトリにダミーの `index.html` を置いて確認する
 - `apps/web/src/pages/home-page.test.tsx`: ホーム画面が空の `<main>` を描画すること
 - `apps/web/src/routes.test.tsx`: `/` でホーム画面が表示されること
 - `apps/web/src/lib/utils.test.ts`: `cn()` がクラスを結合し、競合する Tailwind のクラスを解決すること
 - `apps/web/src/lib/api-client.test.ts`: `apiClient.api.$get()` が `GET /api` を呼び、JSON を返すこと
 - `apps/api/src/lib/env.test.ts`: 必須の環境変数の検証（元のアプリから移植）
-- `apps/api/src/lib/prisma.test.ts`: DB に接続できること、Prisma のセッションのタイムゾーンと DB サーバーの既定値（`timezone`・`log_timezone`）がどちらも `Asia/Tokyo` であること（統合テスト）
-- `packages/shared/src/jst.test.ts`: JST の日時ヘルパー（元のアプリから移植）
+- `apps/api/src/auth.test.ts`: Auth.js の統合テスト。Google のプロバイダー登録、サインイン時の Google へのリダイレクト、セッションの取得と返す項目（ユーザー ID と JST の有効期限だけ）、サインアウト、サインイン時の監査ログ、ユーザー作成時のロール付与（2 回呼んでも重複しない）、`AUTH_URL` の検証、セッションの延長と期限切れの判定、`requireUser` / `requirePermission` の 401・403 を確かめる（Google とは通信しない）
+- `apps/api/src/lib/audit.test.ts`: 監査ログの書き込み（元のアプリから移植）
+- `apps/api/src/lib/authz.test.ts`: 認可エラーの JSON（401・403。BAN の理由などは返さない）、ロールと権限の判定（`hasRole`・`hasPermission`・`getUserRoles` など）、`requireTopAdminRole`（統合テスト）
+- `apps/api/src/lib/logger.test.ts`: JST の日付のファイルに JST の時刻付きで書き込むこと、`LOG_LEVEL` によるレベルの絞り込み、`LOG_FLG=skip`、本番での JSON の出力
+- `apps/api/src/app.test.ts`: `GET /api` に加え、`apiErrorHandler` が予期しないエラーを JSON の 500 にし、エラーの中身をレスポンスに含めないこと
+- `apps/api/src/index.test.ts`: 必須の環境変数（`DATABASE_URL`・`AUTH_*`）が 1 つでも無ければ、サーバーが起動せずにエラーで終了すること（別プロセスで起動して確かめる）
+- `apps/web/src/test-utils/render.test.tsx`: テストで `useSession()` のログイン状態を与えられること
+- `apps/api/src/lib/prisma.test.ts`: すべての日時の列が TIMESTAMPTZ であること、Prisma で保存した値を別の接続（JST）で読んでも同じ時刻になること、Prisma の接続が UTC であること（アダプターの前提）、SQL で日付を区切るときに `AT TIME ZONE 'Asia/Tokyo'` で JST の日付になること、DB サーバーの既定値が JST であること、`updated_at` のトリガー（統合テスト）
+- `packages/shared/src/jst.test.ts`: JST の日時ヘルパー（出力・入力・表示・日付の区切り）
 
 補足:
 
-- api の Vitest は `apps/api/.env` を読み込みます。ローカルで `docker compose up -d db` とマイグレーションを済ませておくと、統合テストも実行されます。
+- api の Vitest は `apps/api/.env` を読み込みます。ただし `AUTH_*` は、テスト用のダミーの値で上書きします（`vitest.config.ts`）。ローカルで `docker compose up -d db` とマイグレーションを済ませておくと、統合テストも実行されます。
 - web は Vitest の globals を使わないため、Testing Library の `cleanup` を `vitest.setup.ts` で登録しています。
 - api と shared のビルドは `tsconfig.build.json` で行い、`*.test.ts` を `dist` から外しています。型チェックは `tsconfig.json` で行い、テストファイルも対象にします。
 
 ## 今後の作業
 
-1. Auth.js（Google OAuth）を Hono に組み込む
-2. `lib/`、API Routes、画面を順番に移植する（対応表は [AGENTS.md](AGENTS.md) の「Porting from Next.js」）
+1. `lib/`、API Routes、画面（ログイン画面・BAN 画面など）を順番に移植する（対応表は [AGENTS.md](AGENTS.md) の「Porting from Next.js」）

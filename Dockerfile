@@ -57,6 +57,9 @@ COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/web/dist ./apps/web/dist
 
+# ロガーが logs/YYYY-MM-DD.log に書き込むので、node ユーザーが書き込めるようにする
+RUN mkdir -p /app/logs && chown node:node /app/logs
+
 USER node
 EXPOSE 3000
 CMD ["node", "apps/api/dist/index.js"]

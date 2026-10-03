@@ -48,6 +48,11 @@ jobs:
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm run prisma:migrate -w @watchlog/api
+      # シードは何度実行しても壊れない（2 回目も成功する）ことを確かめる
+      - name: Seed (twice)
+        run: |
+          npm run prisma:seed -w @watchlog/api
+          npm run prisma:seed -w @watchlog/api
       - run: npm run test
       - run: npm run build
 
@@ -56,6 +61,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # app は認証の環境変数が無いと起動しないので、CI ではダミーの値を渡す
+      - name: Create dummy apps/api/.env
+        run: |
+          cat > apps/api/.env <<'DOTENV'
+          AUTH_SECRET=ci-dummy-auth-secret
+          AUTH_GOOGLE_ID=ci-dummy-google-client-id
+          AUTH_GOOGLE_SECRET=ci-dummy-google-client-secret
+          DOTENV
       - name: Start db → migrate → app
         run: docker compose up -d --build
       - name: Smoke test
@@ -63,6 +76,8 @@ jobs:
           for _ in $(seq 1 60); do curl -sf http://localhost:3000/api && break; sleep 1; done
           test "$(curl -sf http://localhost:3000/api)" = "{}"
           curl -sf -o /dev/null http://localhost:3000/
+          curl -sf http://localhost:3000/api/auth/providers | grep -q '"google"'
+          test "$(curl -s http://localhost:3000/api/auth/session)" = "null"
           test "$(docker compose ps -a --format '{{.ExitCode}}' migrate)" = "0"
           docker compose exec -T app node --input-type=module -e '
             const { prisma } = await import("/app/apps/api/dist/lib/prisma.js");

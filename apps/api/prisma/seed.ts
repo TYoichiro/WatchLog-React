@@ -1,8 +1,7 @@
 // prisma/seed.ts
 import "dotenv/config";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../src/generated/prisma/client.js";
-import { createJstWallTimeDate } from "@watchlog/shared";
+import { createJstDateTime } from "@watchlog/shared";
+import { createPrismaClient } from "../src/lib/prisma.js";
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -50,7 +49,7 @@ const dashboardNotices = [
     title: "β番公開のお知らせ",
     content:
       "新バージョンのβ版を公開しました。新しいUIや機能をぜひお試しください。フィードバックもお待ちしています！",
-    publishedAt: createJstWallTimeDate("2026-05-04T12:00:00.000"),
+    publishedAt: createJstDateTime("2026-05-04T12:00:00.000"),
     expiresAt: null,
     linkUrl: null,
     displayTarget: "AUTHENTICATED",
@@ -59,7 +58,7 @@ const dashboardNotices = [
     title: "設定の招待コードについて",
     content:
       "最大3名まで招待コードを発行できるようになりました。仲の良い配信者を招待してみてください。",
-    publishedAt: createJstWallTimeDate("2026-05-04T12:00:00.000"),
+    publishedAt: createJstDateTime("2026-05-04T12:00:00.000"),
     expiresAt: null,
     linkUrl: null,
     displayTarget: "AUTHENTICATED",
@@ -67,7 +66,7 @@ const dashboardNotices = [
   {
     title: "ログイン方法について",
     content: "Googleアカウントでログインできます。Xログインは準備が整い次第ご利用いただけます。",
-    publishedAt: createJstWallTimeDate("2026-05-04T09:00:00.000"),
+    publishedAt: createJstDateTime("2026-05-04T09:00:00.000"),
     expiresAt: null,
     linkUrl: null,
     displayTarget: "LOGIN",
@@ -75,19 +74,15 @@ const dashboardNotices = [
   {
     title: "WatchLogについて",
     content: "招待制になりました",
-    publishedAt: createJstWallTimeDate("2026-05-04T09:00:00.000"),
+    publishedAt: createJstDateTime("2026-05-04T09:00:00.000"),
     expiresAt: null,
     linkUrl: null,
     displayTarget: "LOGIN",
   },
 ] as const;
 
-const adapter = new PrismaPg({
-  connectionString: requiredEnv("DATABASE_URL"),
-});
-const prisma = new PrismaClient({
-  adapter,
-});
+// アプリと同じ設定（セッションを UTC にする）で接続する。src/lib/prisma.ts を参照
+const prisma = createPrismaClient(requiredEnv("DATABASE_URL"));
 
 async function main() {
   const [adminRole, userRole, premiumUserRole] = await Promise.all([

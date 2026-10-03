@@ -1,181 +1,160 @@
 import { describe, expect, it } from "vitest";
-
 import {
-  createJstWallTimeDate,
-  formatJstWallDateTime,
-  parseJstWallTime,
+  APP_TIME_ZONE,
+  createJstDateTime,
+  formatJstDateTime,
+  parseJstDateTime,
+  startOfJstDay,
+  toJstDateString,
   toJstIsoString,
-  toJstWallTimeDate,
-  toJstWallTimeIsoString,
 } from "./jst.js";
 
-// UTC 2026-01-15 06:00:00.000 → JST 2026-01-15 15:00:00.000 (+09:00)
-const UTC_BASE = new Date("2026-01-15T06:00:00.000Z");
-const JST_EXPECTED_ISO = "2026-01-15T15:00:00.000+09:00";
+// UTC 2026-01-15 06:00:00.000 と JST 2026-01-15 15:00:00.000 は同じ時刻
+const INSTANT = new Date("2026-01-15T06:00:00.000Z");
+const JST_ISO = "2026-01-15T15:00:00.000+09:00";
+
+describe("APP_TIME_ZONE", () => {
+  it("Asia/Tokyo", () => {
+    expect(APP_TIME_ZONE).toBe("Asia/Tokyo");
+  });
+});
 
 describe("toJstIsoString", () => {
-  it("UTC 日時を JST ISO 文字列に変換する", () => {
-    expect(toJstIsoString(UTC_BASE)).toBe(JST_EXPECTED_ISO);
+  it("日時を +09:00 付きの JST の文字列にする", () => {
+    expect(toJstIsoString(INSTANT)).toBe(JST_ISO);
   });
 
-  it("引数省略時は現在時刻を使用して文字列を返す（+09:00 を含む）", () => {
-    const result = toJstIsoString();
-    expect(result).toMatch(/\+09:00$/);
+  it("JST では日付が変わる時刻も正しく変換する", () => {
+    expect(toJstIsoString(new Date("2026-12-31T15:00:00.000Z"))).toBe(
+      "2027-01-01T00:00:00.000+09:00",
+    );
   });
 
-  it("UTC 2026-01-01 00:00:00 → JST 2026-01-01 09:00:00", () => {
-    const utc = new Date("2026-01-01T00:00:00.000Z");
-    expect(toJstIsoString(utc)).toBe("2026-01-01T09:00:00.000+09:00");
+  it("ミリ秒を 3 桁で出す", () => {
+    expect(toJstIsoString(new Date("2026-01-01T00:00:00.007Z"))).toBe(
+      "2026-01-01T09:00:00.007+09:00",
+    );
   });
 
-  it("UTC 2026-12-31 23:00:00 → JST 翌日 2027-01-01 08:00:00", () => {
-    const utc = new Date("2026-12-31T23:00:00.000Z");
-    expect(toJstIsoString(utc)).toBe("2027-01-01T08:00:00.000+09:00");
-  });
-});
-
-describe("toJstWallTimeDate", () => {
-  it("UTC 日時に +9h した Date を返す", () => {
-    const result = toJstWallTimeDate(UTC_BASE);
-    expect(result.toISOString()).toBe("2026-01-15T15:00:00.000Z");
+  it("文字列に戻すと同じ時刻になる", () => {
+    expect(new Date(toJstIsoString(INSTANT)).getTime()).toBe(INSTANT.getTime());
   });
 
-  it("引数省略時は現在時刻 +9h の Date を返す", () => {
-    const before = Date.now() + 9 * 60 * 60 * 1000;
-    const result = toJstWallTimeDate();
-    const after = Date.now() + 9 * 60 * 60 * 1000;
-    expect(result.getTime()).toBeGreaterThanOrEqual(before);
-    expect(result.getTime()).toBeLessThanOrEqual(after);
+  it("引数を省略すると現在時刻を使う", () => {
+    const before = Date.now();
+    const result = new Date(toJstIsoString()).getTime();
+    expect(result).toBeGreaterThanOrEqual(before);
+    expect(result).toBeLessThanOrEqual(Date.now());
   });
 });
 
-describe("toJstWallTimeIsoString", () => {
-  it("UTC Date の UTC 部分を JST ISO 文字列としてフォーマットする", () => {
-    // toJstWallTimeDate で +9h 済みの Date を渡す想定
-    const jstWallTime = new Date("2026-01-15T15:00:00.000Z");
-    expect(toJstWallTimeIsoString(jstWallTime)).toBe(JST_EXPECTED_ISO);
+describe("toJstDateString", () => {
+  it("JST の日付を返す", () => {
+    expect(toJstDateString(INSTANT)).toBe("2026-01-15");
+  });
+
+  it("JST の 0〜9 時は、UTC では前日でも JST の日付になる", () => {
+    // JST 2026-01-15 08:59 = UTC 2026-01-14 23:59
+    expect(toJstDateString(new Date("2026-01-14T23:59:00.000Z"))).toBe("2026-01-15");
+  });
+
+  it("JST の 23:59 は当日のまま", () => {
+    expect(toJstDateString(new Date("2026-01-15T14:59:59.999Z"))).toBe("2026-01-15");
   });
 });
 
-describe("formatJstWallDateTime", () => {
-  it("UTC=0 として Intl.DateTimeFormat でフォーマットする（year/month/day）", () => {
-    // toJstWallTimeDate で +9h 済みの Date を渡す
-    const jstWallTime = new Date("2026-01-15T15:00:00.000Z");
-    const result = formatJstWallDateTime(jstWallTime, {
+describe("startOfJstDay", () => {
+  it("JST のその日の 0 時を返す", () => {
+    expect(startOfJstDay(INSTANT).toISOString()).toBe("2026-01-14T15:00:00.000Z");
+    expect(toJstIsoString(startOfJstDay(INSTANT))).toBe("2026-01-15T00:00:00.000+09:00");
+  });
+
+  it("JST の 0 時ちょうどはその日の 0 時", () => {
+    const midnight = new Date("2026-01-14T15:00:00.000Z");
+    expect(startOfJstDay(midnight).getTime()).toBe(midnight.getTime());
+  });
+
+  it("JST の 0〜9 時でも、UTC の前日ではなく JST の当日の 0 時になる", () => {
+    expect(toJstIsoString(startOfJstDay(new Date("2026-01-14T23:59:00.000Z")))).toBe(
+      "2026-01-15T00:00:00.000+09:00",
+    );
+  });
+
+  it("月末・年末もまたげる", () => {
+    expect(toJstIsoString(startOfJstDay(new Date("2026-12-31T15:30:00.000Z")))).toBe(
+      "2027-01-01T00:00:00.000+09:00",
+    );
+  });
+});
+
+describe("formatJstDateTime", () => {
+  it("JST で表示用に整形する", () => {
+    const text = formatJstDateTime(INSTANT, {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
-    });
-    expect(result).toContain("2026");
-    expect(result).toContain("01");
-    expect(result).toContain("15");
-  });
-
-  it("時・分のフォーマット", () => {
-    const jstWallTime = new Date("2026-06-15T14:30:00.000Z");
-    const result = formatJstWallDateTime(jstWallTime, {
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
     });
-    expect(result).toContain("14");
-    expect(result).toContain("30");
+
+    expect(text).toBe("2026/01/15 15:00");
+  });
+
+  it("timeZone を指定しても JST で整形する", () => {
+    const text = formatJstDateTime(INSTANT, { hour: "2-digit", hour12: false, timeZone: "UTC" });
+
+    expect(text).toBe("15時");
   });
 });
 
-describe("parseJstWallTime", () => {
-  describe("文字列入力", () => {
-    it("YYYY-MM-DD 形式を JST 壁時刻として解析する", () => {
-      // "2026-01-15" は JST の 2026-01-15 00:00:00 = UTC 2026-01-14 15:00:00
-      const result = parseJstWallTime("2026-01-15");
-      expect(result).not.toBeNull();
-      expect(result!.toISOString()).toBe("2026-01-15T00:00:00.000Z");
-    });
-
-    it("YYYY-MM-DD HH:mm 形式を解析する", () => {
-      const result = parseJstWallTime("2026-06-01 09:30");
-      expect(result).not.toBeNull();
-      expect(result!.toISOString()).toBe("2026-06-01T09:30:00.000Z");
-    });
-
-    it("YYYY-MM-DDTHH:mm:ss 形式を解析する", () => {
-      const result = parseJstWallTime("2026-06-01T12:00:00");
-      expect(result).not.toBeNull();
-      expect(result!.toISOString()).toBe("2026-06-01T12:00:00.000Z");
-    });
-
-    it("ミリ秒付きを解析する", () => {
-      const result = parseJstWallTime("2026-06-01T12:00:00.123");
-      expect(result).not.toBeNull();
-      expect(result!.toISOString()).toBe("2026-06-01T12:00:00.123Z");
-    });
-
-    it("前後の空白をトリムして解析する", () => {
-      const result = parseJstWallTime("  2026-01-15  ");
-      expect(result).not.toBeNull();
-    });
-
-    it("不正な日付文字列は null を返す", () => {
-      expect(parseJstWallTime("not-a-date")).toBeNull();
-    });
-
-    it("空文字列は null を返す", () => {
-      expect(parseJstWallTime("")).toBeNull();
-    });
-
-    it("存在しない日付（2月30日）は null を返す", () => {
-      expect(parseJstWallTime("2026-02-30")).toBeNull();
-    });
-
-    it("存在しない時刻（25時）は null を返す", () => {
-      expect(parseJstWallTime("2026-01-15T25:00:00")).toBeNull();
-    });
+describe("parseJstDateTime", () => {
+  it("オフセットの無い文字列は JST とみなす", () => {
+    expect(parseJstDateTime("2026-01-15T15:00:00.000")?.getTime()).toBe(INSTANT.getTime());
+    expect(parseJstDateTime("2026-01-15 15:00")?.getTime()).toBe(INSTANT.getTime());
   });
 
-  describe("数値入力", () => {
-    it("Unix ミリ秒タイムスタンプを Date に変換して +9h する", () => {
-      // 0ms (UTC 1970-01-01 00:00:00) → JST 壁時刻 = UTC +9h
-      const result = parseJstWallTime(0);
-      expect(result).not.toBeNull();
-      expect(result!.toISOString()).toBe("1970-01-01T09:00:00.000Z");
-    });
-
-    it("NaN は null を返す", () => {
-      expect(parseJstWallTime(NaN)).toBeNull();
-    });
+  it("日付だけなら JST の 0 時", () => {
+    expect(parseJstDateTime("2026-01-15")?.toISOString()).toBe("2026-01-14T15:00:00.000Z");
   });
 
-  describe("非対応型", () => {
-    it("null は null を返す", () => {
-      expect(parseJstWallTime(null)).toBeNull();
-    });
+  it("+09:00 や Z が付いていればそのオフセットに従う", () => {
+    expect(parseJstDateTime(JST_ISO)?.getTime()).toBe(INSTANT.getTime());
+    expect(parseJstDateTime("2026-01-15T06:00:00.000Z")?.getTime()).toBe(INSTANT.getTime());
+    expect(parseJstDateTime("2026-01-15T07:00:00+0100")?.getTime()).toBe(INSTANT.getTime());
+  });
 
-    it("undefined は null を返す", () => {
-      expect(parseJstWallTime(undefined)).toBeNull();
-    });
+  it("前後の空白を無視する", () => {
+    expect(parseJstDateTime("  2026-01-15 15:00  ")?.getTime()).toBe(INSTANT.getTime());
+  });
 
-    it("オブジェクトは null を返す", () => {
-      expect(parseJstWallTime({})).toBeNull();
-    });
+  it("ミリ秒の桁が少なくても読む", () => {
+    expect(parseJstDateTime("2026-01-15T15:00:00.5")?.toISOString()).toBe(
+      "2026-01-15T06:00:00.500Z",
+    );
+  });
 
-    it("配列は null を返す", () => {
-      expect(parseJstWallTime([])).toBeNull();
-    });
+  it("epoch ミリ秒はそのまま Date にする", () => {
+    expect(parseJstDateTime(INSTANT.getTime())?.getTime()).toBe(INSTANT.getTime());
+  });
+
+  it("存在しない日付や不正な形式は null", () => {
+    expect(parseJstDateTime("2026-02-30")).toBeNull();
+    expect(parseJstDateTime("2026-01-15 24:00")).toBeNull();
+    expect(parseJstDateTime("2026/01/15")).toBeNull();
+    expect(parseJstDateTime("")).toBeNull();
+    expect(parseJstDateTime(Number.NaN)).toBeNull();
+    expect(parseJstDateTime(null)).toBeNull();
+    expect(parseJstDateTime({})).toBeNull();
   });
 });
 
-describe("createJstWallTimeDate", () => {
-  it("有効な日付文字列は Date を返す", () => {
-    const result = createJstWallTimeDate("2026-01-15");
-    expect(result).toBeInstanceOf(Date);
-    expect(result.toISOString()).toBe("2026-01-15T00:00:00.000Z");
+describe("createJstDateTime", () => {
+  it("正しい値なら Date を返す", () => {
+    expect(createJstDateTime("2026-01-15 15:00").getTime()).toBe(INSTANT.getTime());
   });
 
-  it("不正な文字列は Error を投げる", () => {
-    expect(() => createJstWallTimeDate("invalid")).toThrow("Invalid JST date-time: invalid");
-  });
-
-  it("存在しない日付は Error を投げる", () => {
-    expect(() => createJstWallTimeDate("2026-02-30")).toThrow();
+  it("不正な値なら例外を投げる", () => {
+    expect(() => createJstDateTime("2026-13-01")).toThrow("Invalid JST date-time: 2026-13-01");
   });
 });

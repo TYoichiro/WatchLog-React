@@ -46,8 +46,17 @@ services:
     image: watchlog-react
     ports:
       - "3000:3000"
+    # 認証の秘密情報（AUTH_SECRET・AUTH_GOOGLE_ID・AUTH_GOOGLE_SECRET）は apps/api/.env から読み込む
+    env_file:
+      - path: apps/api/.env
+        required: false
+    # .env のローカル開発用の値（PORT=3001 など）より優先する
     environment:
       DATABASE_URL: postgresql://watchlog:watchlog@db:5432/watchlog?schema=public
+      PORT: "3000"
+      AUTH_URL: http://localhost:3000/api/auth
+    volumes:
+      - app_logs:/app/logs
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -55,3 +64,5 @@ services:
 
 volumes:
   postgres_data:
+  # logs/YYYY-MM-DD.log（JST の日付ごとのアプリのログ）
+  app_logs:
