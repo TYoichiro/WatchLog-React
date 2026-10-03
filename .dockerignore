@@ -6,3 +6,4 @@
 watchlog-original
 logs
 *.log
+apps/api/src/generated

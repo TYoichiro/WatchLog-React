@@ -10,15 +10,16 @@
     }
   },
   "scripts": {
-    "dev": "tsx watch --conditions=source src/index.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "dev": "prisma generate && tsx watch --conditions=source --env-file-if-exists=.env src/index.ts",
+    "build": "prisma generate && tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "prisma generate && vitest run",
+    "test:watch": "prisma generate && vitest",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
+    "prisma:migrate:dev": "prisma migrate dev",
     "prisma:seed": "prisma db seed",
-    "typecheck": "tsc"
+    "typecheck": "prisma generate && tsc"
   },
   "dependencies": {
     "@auth/core": "^0.41.3",

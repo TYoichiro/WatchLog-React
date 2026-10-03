@@ -11,5 +11,5 @@
     "noEmit": true,
     "customConditions": ["source"]
   },
-  "include": ["src", "vitest.config.ts"]
+  "include": ["src", "prisma", "prisma.config.ts", "vitest.config.ts"]
 }

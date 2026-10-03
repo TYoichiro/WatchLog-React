@@ -150,3 +150,6 @@ vite.config.ts.timestamp-*
 
 # original file
 watchlog-original
+
+# Prisma Client（prisma generate で生成する）
+apps/api/src/generated/

@@ -6,7 +6,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default defineConfig([
-  globalIgnores(["**/dist", "**/coverage", "watchlog-original"]),
+  globalIgnores(["**/dist", "**/coverage", "watchlog-original", "apps/api/src/generated"]),
   {
     files: ["**/*.{js,ts,tsx}"],
     extends: [js.configs.recommended, tseslint.configs.recommended],

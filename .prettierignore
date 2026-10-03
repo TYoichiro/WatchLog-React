@@ -6,3 +6,5 @@ watchlog-original
 *.md
 # shadcn から取り込んだ CSS はそのまま保つ
 apps/web/src/styles/shadcn-tailwind.css
+# Prisma Client（生成コード）
+apps/api/src/generated

@@ -2,7 +2,7 @@
 
 SHOWROOM 配信ログツール「WatchLog」（Next.js 16 / App Router）を、React SPA と Hono API サーバーの構成で作り直すプロジェクトです。
 
-> **現在の状態**: Docker で起動できます。画面は空ページで、API（`GET /api`）は空の JSON（`{}`）を返すだけです。移植の準備（`@/` エイリアス、shadcn の設定とテーマ、API の型共有、TanStack Query）までは済んでいます。Prisma の設定はまだありません。
+> **現在の状態**: Docker で起動できます。画面は空ページで、API（`GET /api`）は空の JSON（`{}`）を返すだけです。移植の準備（`@/` エイリアス、shadcn の設定とテーマ、API の型共有、TanStack Query）と、PostgreSQL・Prisma の導入（スキーマ・マイグレーション・シードを元のアプリから移植）までは済んでいます。認証（Auth.js）はまだありません。
 >
 > AI エージェント（Claude Code・Codex など）向けの開発ルールと移植の対応表は [AGENTS.md](AGENTS.md) にあります。
 
@@ -50,14 +50,24 @@ WatchLog-React/
 │  │     ├─ lib/         # cn()、apiClient（hc<AppType>）、QueryClient
 │  │     └─ test-utils/  # renderWithProviders / renderRoute
 │  └─ api/               # @watchlog/api    Hono API サーバー
+│     ├─ .env.example    # ローカル開発用の環境変数（.env にコピーして使う）
+│     ├─ prisma.config.ts  # Prisma の設定（スキーマ・マイグレーション・シードの場所）
 │     ├─ tsconfig.build.json  # ビルド用。テストファイルを出力から外す
+│     ├─ prisma/
+│     │  ├─ schema.prisma  # 元のアプリから移植（生成先だけ変更）
+│     │  ├─ migrations/  # 元のアプリのマイグレーションをそのままコピー
+│     │  └─ seed.ts      # ロール・権限などの初期データ
 │     └─ src/
 │        ├─ app.ts       # /api のルート定義（AppType を export し、web が型として使う）
 │        ├─ server.ts    # API と SPA を配信するアプリを組み立てる
-│        └─ index.ts     # サーバーの起動（ポート待ち受けとシグナル処理）
+│        ├─ index.ts     # サーバーの起動（ポート待ち受けとシグナル処理）
+│        ├─ lib/         # prisma（DB 接続）、env（必須の環境変数）、server-timezone
+│        └─ generated/prisma/  # prisma generate の出力（git 管理外）
 ├─ packages/
 │  └─ shared/            # @watchlog/shared 共有する型・JST ヘルパーなど
-│     └─ src/index.ts    # ここから export する（今は空）
+│     └─ src/
+│        ├─ index.ts     # ここから export する
+│        └─ jst.ts       # JST の日時ヘルパー（元のアプリの lib/jst.ts）
 └─ watchlog-original/    # 移植元の Next.js 版（参照用、.gitignore 対象）
 ```
 
@@ -177,6 +187,50 @@ npm 11 の `allowScripts` では、次のパッケージだけにインストー
 | `@vercel/analytics`、`@vercel/speed-insights` | Vercel にはデプロイしない（自前の Docker で運用する）ため |
 | `shadcn` | CLI の依存に修正版のない脆弱性があるため入れない。CSS だけを取り込み、CLI は `npx shadcn@4.5.0` で実行する（「shadcn / テーマ」を参照） |
 
+## データベース（PostgreSQL / Prisma）
+
+| 項目 | 内容 |
+| --- | --- |
+| DB | PostgreSQL 16（`postgres:16-alpine3.24`）。元のアプリと同じメジャーバージョン |
+| スキーマ | `apps/api/prisma/schema.prisma`。元のアプリからコピーし、生成先（`../src/generated/prisma`）と、Node ESM 向けの出力設定（`moduleFormat = "esm"`、`importFileExtension = "js"`）だけを変えた |
+| マイグレーション | `apps/api/prisma/migrations`。元のアプリの 8 本をそのままコピーしたので、既存の DB とそのまま互換がある。既存のマイグレーションは編集せず、変更は `prisma migrate dev` で新しいマイグレーションとして追加する |
+| Prisma Client | `prisma generate` で `apps/api/src/generated/prisma` に TypeScript として生成する（git 管理外）。tsc でそのまま `dist` にコンパイルされるので、実行用イメージへの追加のコピーは不要 |
+| 接続 | `apps/api/src/lib/prisma.ts` の `prisma` を使う。`@prisma/adapter-pg` で接続し、DB セッションのタイムゾーンを `Asia/Tokyo` にする |
+
+`prisma generate` は、api の `dev`・`build`・`typecheck`・`test` の前に自動で実行されます。DB への接続は不要なので、`DATABASE_URL` がなくても動きます。
+
+### 日時とタイムゾーン（すべて JST）
+
+UTC が混ざると混乱するので、DB・アプリ・コンテナのどこで見ても日本時間（`Asia/Tokyo`）になるようにしています。
+
+| 場所 | 設定 |
+| --- | --- |
+| DB の列 | `TIMESTAMP(3)`（タイムゾーンなし）に **JST の値**を保存する。既定値は `CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'`（元のアプリと同じ） |
+| DB サーバー | 既定の `timezone` と `log_timezone` を `Asia/Tokyo` にする。compose では起動オプション（`-c timezone=...`）と `TZ` で、CI では `TZ`（initdb が設定ファイルに書き込む）で設定する。psql や生の SQL の `now()` も、ログの時刻も JST になる |
+| Prisma の接続 | 接続オプションで、セッションのタイムゾーンも `Asia/Tokyo` にする |
+| コンテナ | db・migrate・app はすべて `TZ=Asia/Tokyo`。Node のイメージには `tzdata` を入れているので、`date` コマンドも JST になる |
+| Node.js | `TZ=Asia/Tokyo`。`server-timezone.ts` と `prisma.config.ts` でも `process.env.TZ` を設定する |
+
+コードで日時を扱うときは、`@watchlog/shared` の JST ヘルパーを使います。Prisma は JST の値を「UTC の `Date`」として返すので、`new Date()` をそのまま DB に書き込むと 9 時間ずれます。
+
+| 用途 | 使う関数 |
+| --- | --- |
+| 現在時刻を書き込む・保存済みの時刻と比べる | `toJstWallTimeDate()` |
+| 入力値（文字列）を日時にする | `parseJstWallTime()` / `createJstWallTimeDate()` |
+| API で返す | `toJstWallTimeIsoString()`（`+09:00` 付きの文字列） |
+| 画面に表示する | `formatJstWallDateTime()` |
+
+`apps/api/src/lib/prisma.test.ts` で、Prisma の接続と DB サーバーの既定値の両方が `Asia/Tokyo` であることを確認しています。
+
+### api の Prisma 関連の npm scripts
+
+| コマンド（`-w @watchlog/api` を付けて実行） | 内容 |
+| --- | --- |
+| `npm run prisma:generate` | Prisma Client を生成する |
+| `npm run prisma:migrate` | マイグレーションを適用する（`prisma migrate deploy`） |
+| `npm run prisma:migrate:dev` | スキーマの変更から新しいマイグレーションを作る（`prisma migrate dev`） |
+| `npm run prisma:seed` | 初期データを入れる（ロール `admin`・`premiumuser`・`user` と権限など） |
+
 ## Docker で起動する
 
 ```bash
@@ -188,16 +242,30 @@ docker compose up -d --build
 | http://localhost:3000/ | 画面（今は空ページ） |
 | http://localhost:3000/api | API（今は `{}` を返す） |
 
-停止するときは `docker compose down` を実行します。
+停止するときは `docker compose down` を実行します。DB のデータも消す場合は `docker compose down -v` です。
+
+### サービス
+
+| サービス | 内容 |
+| --- | --- |
+| `db` | PostgreSQL。データは名前付きボリューム `postgres_data` に保存する。ローカル開発用に `127.0.0.1:5432` で公開する（`DB_PORT` で変更でき、外部からは接続できない） |
+| `migrate` | `db` が起動したら `prisma migrate deploy` を実行して終了する。Prisma CLI が必要なので、Dockerfile の `migrator` ステージ（devDependencies を含む）を使う |
+| `app` | `migrate` が成功してから起動する |
+
+初期データは次のコマンドで入れます。
+
+```bash
+docker compose run --rm migrate npx prisma db seed
+```
 
 ### コンテナの中身
 
-- `Dockerfile` は 4 段階でビルドします。依存のインストール → shared・web・api のビルド → api の本番依存だけをインストール → 実行用イメージ、の順です。
+- `Dockerfile` は 4 段階でビルドします。依存のインストール → shared・web・api のビルド（`prisma generate` を含む）→ api の本番依存だけをインストール → 実行用イメージ、の順です。マイグレーション用の `migrator` ステージは、ビルドの段階から分岐させたもので、実行用イメージには含まれません。
 - 実行用イメージでは、**api サーバー 1 つが `/api/*` と SPA の両方を配信**します。
   - SPA の場所は環境変数 `WEB_DIST_DIR` で指定します。
   - `/api/*` 以外の未知のパスには `index.html` を返すので、React Router のクライアントルーティングがそのまま動きます。
   - `/api/*` で存在しないパスには、JSON で 404 を返します。
-- 環境変数 `TZ=Asia/Tokyo` を設定しています。alpine には tzdata がないので `date` コマンドは UTC を表示しますが、Node.js は自身の ICU で JST として動きます。
+- 環境変数 `TZ=Asia/Tokyo` を設定し、`tzdata` を入れています。Node.js も `date` コマンドも JST で動きます。
 - 実行ユーザーは `node`（root ではない）です。SIGTERM を受け取ると、すぐに正常終了します。
 
 ### ベースイメージと脆弱性対策
@@ -220,7 +288,15 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image
 
 > Git Bash で実行するときは、パスが変換されないよう先頭に `MSYS_NO_PATHCONV=1` を付けてください。
 
-> Prisma を導入したら、`prisma generate` で生成したクライアントを実行用イメージにコピーする必要があります。`--omit` の設定で、実行時に必要なものまで外れていないかも確認してください。
+> 実行用イメージで Prisma Client が動くことは確認済みです（DB を検索でき、タイムゾーンは JST）。
+
+#### postgres イメージについて
+
+- `postgres:16-alpine3.24` を使い、`pull_policy: daily` で1日1回、最新パッチのイメージを取得します。ローカルに古いイメージが残っていると、OS パッケージの脆弱性（OpenSSL など）がそのまま残るためです。
+- 最新のイメージでも、Trivy は `gosu` に組み込まれた Go 標準ライブラリの HIGH / CRITICAL を検出します。
+  - `gosu` は、公式イメージが起動時に root から postgres ユーザーへ切り替えるためだけのツールです。切り替えたあとは postgres を起動するだけなので、該当する Go の機能は使われず、悪用される経路はありません。
+  - 公式イメージの更新で解消されるのを待ちます。
+  - アプリのイメージ（`watchlog-react`）は 0 件です。
 
 ## ローカル開発
 
@@ -228,9 +304,15 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image
 
 ```bash
 npm install
-npm run dev:api   # http://localhost:3000（API）
+cp apps/api/.env.example apps/api/.env   # DATABASE_URL を設定する（初回のみ）
+docker compose up -d db                  # PostgreSQL だけを Docker で起動する
+npm run prisma:migrate -w @watchlog/api  # マイグレーションを適用する
+npm run prisma:seed -w @watchlog/api     # 初期データを入れる（初回のみ）
+npm run dev:api   # http://localhost:3000（API。apps/api/.env を読み込む）
 npm run dev:web   # http://localhost:5173（画面。/api は 3000 番へプロキシ）
 ```
+
+> `docker compose up -d`（全サービス）で `app` も起動していると、3000 番ポートがぶつかって `dev:api` が起動できません。ローカル開発中は `db` だけを起動してください。
 
 ### npm scripts（ルート）
 
@@ -260,8 +342,8 @@ npm run dev:web   # http://localhost:5173（画面。/api は 3000 番へプロ�
 
 | ジョブ | 内容 |
 | --- | --- |
-| Lint / Typecheck / Test / Build | `npm ci` → lint → format:check → typecheck → test → build |
-| Docker build | イメージをビルドし、コンテナを起動して `/api` が `{}` を返すことと、`/` が表示されることを確認する |
+| Lint / Typecheck / Test / Build | PostgreSQL のサービスコンテナを起動し、`npm ci` → lint → format:check → typecheck → マイグレーション適用 → test → build を実行する |
+| Docker compose | `docker compose up -d --build` で db → migrate → app を起動し、`/api` が `{}` を返すこと、`/` が表示されること、migrate が正常終了したこと、実行用イメージの Prisma Client で DB を検索できることを確認する |
 
 コミットの前には、ローカルでも `npm run lint && npm run format:check && npm run typecheck && npm run test && npm run build` を実行してください。
 
@@ -271,7 +353,8 @@ Vitest と Testing Library を使います。テストファイルは対象フ�
 
 | ワークスペース | 実行環境 | 書き方 |
 | --- | --- | --- |
-| `apps/api` | node | Hono の `app.request()` で、ポートを開かずにリクエストを送る |
+| `apps/api` | node | Hono の `app.request()` で、ポートを開かずにリクエストを送る。DB を使うテストは Prisma をモックせず、実際の PostgreSQL に接続する（`DATABASE_URL` がなければスキップ） |
+| `packages/shared` | node | 純粋な関数を直接テストする |
 | `apps/web` | jsdom | `@/test-utils/render` の `renderWithProviders` / `renderRoute` で描画する。通信は `vi.stubGlobal("fetch", ...)` で差し替える |
 
 今あるテスト:
@@ -282,14 +365,17 @@ Vitest と Testing Library を使います。テストファイルは対象フ�
 - `apps/web/src/routes.test.tsx`: `/` でホーム画面が表示されること
 - `apps/web/src/lib/utils.test.ts`: `cn()` がクラスを結合し、競合する Tailwind のクラスを解決すること
 - `apps/web/src/lib/api-client.test.ts`: `apiClient.api.$get()` が `GET /api` を呼び、JSON を返すこと
+- `apps/api/src/lib/env.test.ts`: 必須の環境変数の検証（元のアプリから移植）
+- `apps/api/src/lib/prisma.test.ts`: DB に接続できること、Prisma のセッションのタイムゾーンと DB サーバーの既定値（`timezone`・`log_timezone`）がどちらも `Asia/Tokyo` であること（統合テスト）
+- `packages/shared/src/jst.test.ts`: JST の日時ヘルパー（元のアプリから移植）
 
 補足:
 
+- api の Vitest は `apps/api/.env` を読み込みます。ローカルで `docker compose up -d db` とマイグレーションを済ませておくと、統合テストも実行されます。
 - web は Vitest の globals を使わないため、Testing Library の `cleanup` を `vitest.setup.ts` で登録しています。
 - api と shared のビルドは `tsconfig.build.json` で行い、`*.test.ts` を `dist` から外しています。型チェックは `tsconfig.json` で行い、テストファイルも対象にします。
 
 ## 今後の作業
 
-1. compose に PostgreSQL を追加し、`prisma.config.ts` と Prisma スキーマを移植する
-2. Auth.js（Google OAuth）を Hono に組み込む
-3. `lib/`、API Routes、画面を順番に移植する（対応表は [AGENTS.md](AGENTS.md) の「Porting from Next.js」）
+1. Auth.js（Google OAuth）を Hono に組み込む
+2. `lib/`、API Routes、画面を順番に移植する（対応表は [AGENTS.md](AGENTS.md) の「Porting from Next.js」）

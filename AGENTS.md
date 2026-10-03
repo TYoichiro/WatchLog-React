@@ -19,7 +19,7 @@ npm workspaces monorepo (Node.js 24, npm 11, TypeScript 6.0 strict):
 | `@watchlog/api` | `apps/api` | Hono 4 on `@hono/node-server`, Prisma 7 + PostgreSQL (`@prisma/adapter-pg`), Auth.js via `@hono/auth-js`, Vitest (node) |
 | `@watchlog/shared` | `packages/shared` | Code and types shared by web and api |
 
-Prisma, Auth.js and PostgreSQL are installed but **not wired up yet**.
+PostgreSQL 16 and Prisma are wired up (schema, migrations and seed are ported from the original app). Auth.js is installed but **not wired up yet**.
 
 ## Critical Non-Obvious Facts
 
@@ -38,10 +38,25 @@ Prisma, Auth.js and PostgreSQL are installed but **not wired up yet**.
   - Add components with `npx shadcn@4.5.0 add <name>` from `apps/web`.
   - The shadcn registry now emits `import { cn } from "cn"`. Rewrite that import to `import { cn } from "@/lib/utils"`, and do not install the `cn` package.
   - When porting, copy `watchlog-original/components/ui/*.tsx` as-is; they already use `@/lib/utils`.
-- **Timezone is `Asia/Tokyo` everywhere.** Always pass `timeZone: "Asia/Tokyo"` explicitly when formatting dates. Never rely on the runtime default.
+- **Everything is JST (`Asia/Tokyo`); UTC must never show up.**
+  - **DB storage:** timestamp columns are `TIMESTAMP(3)` without a time zone and hold **JST wall-clock time**. Column defaults use `CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tokyo'`.
+  - **Reading and writing from code:** Prisma returns these columns as a `Date` whose UTC fields are the JST wall clock. Always go through the `@watchlog/shared` helpers. Never write `new Date()` straight into a timestamp column.
+    - Use `toJstWallTimeDate()` for "now", both when writing and when comparing against stored times.
+    - Use `parseJstWallTime` / `createJstWallTimeDate` for input.
+    - Use `toJstWallTimeIsoString` when returning values from the API (`+09:00` strings).
+    - Use `formatJstWallDateTime` for display.
+  - **DB server:** the default `timezone` and `log_timezone` are `Asia/Tokyo`. compose sets them with `-c` flags and `TZ`; CI sets them through `TZ` at initdb. The Prisma connection also sets the session timezone. `prisma.test.ts` checks both; keep those tests passing.
+  - **Containers and processes:** db, migrate and app run with `TZ=Asia/Tokyo`, and the Node images install `tzdata` so OS clocks are JST too. Node processes also set `process.env.TZ` themselves (`server-timezone.ts`, `prisma.config.ts`).
+  - **Formatting:** always pass `timeZone: "Asia/Tokyo"` explicitly. Never rely on the runtime default.
+- **Database (Prisma 7 + PostgreSQL 16).**
+  - Schema, migrations and seed live in `apps/api/prisma/`. The migrations are byte-for-byte copies of the original app's, so existing databases stay compatible. **Never edit an existing migration**; change `schema.prisma` and run `npm run prisma:migrate:dev -w @watchlog/api` to add a new one.
+  - Prisma Client is generated into `apps/api/src/generated/prisma` (gitignored, ESM with `.js` import extensions). Import it as `../generated/prisma/client.js`, never from `@prisma/client`. tsc compiles it into `dist`, so nothing extra is copied into the Docker image.
+  - `prisma generate` runs automatically before the api `dev`, `build`, `typecheck` and `test` scripts. It does not need `DATABASE_URL`.
+  - Use the singleton `prisma` from `apps/api/src/lib/prisma.ts`. It connects through `@prisma/adapter-pg` and sets the session timezone to `Asia/Tokyo` (the server default is JST as well). Use transactions for multi-step writes.
+  - Local env vars go in `apps/api/.env` (copy `.env.example`). The api `dev` script, Vitest and `prisma.config.ts` all load it.
+  - In Docker, the `migrate` compose service runs `prisma migrate deploy` from the `migrator` Dockerfile stage before `app` starts. Seed with `docker compose run --rm migrate npx prisma db seed`.
 - **Docker runtime has no npm.** The runtime image removes npm, npx, corepack and yarn, and installs api deps with `npm ci --omit=dev --omit=optional --omit=peer`.
   - If a package works locally but is missing in Docker, it is probably being omitted. Make it a direct `dependencies` entry of `apps/api`.
-  - When Prisma is added, the generated client must also be copied into the runtime image.
 - **Keep `npm audit` at 0.**
   - Fix vulnerable transitive deps with root `overrides`.
   - Approve install scripts explicitly with `npm install-scripts approve <pkg>`; they are recorded in root `allowScripts`.
@@ -70,14 +85,16 @@ When porting an API route, keep its auth and permission semantics. The original 
 Run from the repository root:
 
 ```bash
-npm run dev:api          # API server on :3000 (tsx watch)
+docker compose up -d db  # PostgreSQL only, on 127.0.0.1:5432 (for local dev)
+npm run prisma:migrate -w @watchlog/api   # apply migrations (prisma:seed for initial data)
+npm run dev:api          # API server on :3000 (tsx watch, loads apps/api/.env)
 npm run dev:web          # Vite dev server on :5173, proxies /api to :3000
 npm run lint             # ESLint (all workspaces)
 npm run format           # Prettier --write (format:check verifies only)
 npm run typecheck        # tsc --noEmit (all workspaces, includes tests)
 npm run test             # Vitest single run (all workspaces)
 npm run build            # shared → api → web
-docker compose up -d --build   # production-like container on :3000
+docker compose up -d --build   # db → migrate → app, production-like on :3000 (stop it before dev:api: same port)
 ```
 
 **Validation sequence before committing:** `npm run lint && npm run format:check && npm run typecheck && npm run test && npm run build`. CI (`.github/workflows/ci.yml`) runs the same steps plus a Docker build and smoke test on pushes to `main` / `develop` and on pull requests.
@@ -90,6 +107,7 @@ docker compose up -d --build   # production-like container on :3000
 - Colocate tests with the code: `foo.ts` → `foo.test.ts`, `Bar.tsx` → `Bar.test.tsx`.
 - Vitest globals are off; import `describe` / `it` / `expect` from `vitest`.
 - **api:** call `app.request(...)` on the Hono app. Do not open ports.
+- **Database tests:** do not mock Prisma. Hit the real PostgreSQL, and guard the suite with `describe.skipIf(!process.env.DATABASE_URL)`. Import `./prisma.js` lazily inside `beforeAll`, because importing it throws when `DATABASE_URL` is missing. CI provides a PostgreSQL service with migrations applied.
 - **web:**
   - Use `renderWithProviders` (QueryClient) and `renderRoute(path)` (memory router + app routes) from `@/test-utils/render`.
   - Mock the network with `vi.stubGlobal("fetch", ...)`.
