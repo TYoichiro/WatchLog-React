@@ -1,0 +1,10 @@
+services:
+  app:
+    build:
+      context: .
+      # ビルドのたびにベースイメージの最新パッチを取得する
+      pull: true
+    image: watchlog-react
+    ports:
+      - "3000:3000"
+    restart: unless-stopped

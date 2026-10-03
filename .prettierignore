@@ -1,0 +1,8 @@
+dist
+coverage
+package-lock.json
+watchlog-original
+# ドキュメントは手で整形する（表の位置揃えで差分が増えるため）
+*.md
+# shadcn から取り込んだ CSS はそのまま保つ
+apps/web/src/styles/shadcn-tailwind.css
